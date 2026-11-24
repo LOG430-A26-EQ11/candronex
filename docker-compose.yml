@@ -1,0 +1,160 @@
+services:
+  keycloak:
+    networks: [public]
+    image: quay.io/keycloak/keycloak:26.0
+    command: start-dev --import-realm --http-port=8080
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: ${KC_ADMIN}
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KC_ADMIN_PASSWORD}
+      KC_HOSTNAME: http://localhost:8081          # émetteur (iss) fixe
+      KC_HOSTNAME_BACKCHANNEL_DYNAMIC: "true"
+      KC_HEALTH_ENABLED: "true"
+      CANDRONEX_ADMIN_SECRET: ${CANDRONEX_ADMIN_SECRET}
+      CLIENT_MANAGEMENT_SERVICE_SECRET: ${CLIENT_MANAGEMENT_SERVICE_SECRET}
+      INSPECTRA_DEMO_SECRET: ${INSPECTRA_DEMO_SECRET}
+      AEROTECH_DEMO_SECRET: ${AEROTECH_DEMO_SECRET}
+      JETON_COURT_SECRET: ${JETON_COURT_SECRET}
+    volumes:
+      - ./keycloak/realm-candronex.json:/opt/keycloak/data/import/realm-candronex.json:ro
+    ports:
+      - "8081:8080"
+    healthcheck:
+      test: ["CMD-SHELL", "exec 3<>/dev/tcp/localhost/9000 && echo -e 'GET /health/ready HTTP/1.1\\r\\nHost: localhost\\r\\nConnection: close\\r\\n\\r\\n' >&3 && grep -q 'UP' <&3"]
+      interval: 10s
+      retries: 20
+
+  api-gateway:
+    networks: [public]
+    image: devopsfaith/krakend:2.7.2
+    volumes:
+      - ./krakend/krakend.json:/etc/krakend/krakend.json:ro
+    ports:
+      - "${GATEWAY_PORT:-8080}:8080"
+    depends_on:
+      keycloak: { condition: service_healthy }
+  # Swagger UI : affiche les 4 contrats de openapi/ (passerelle + 3 services), http://localhost:8090.
+  # Les services n'ont aucun port ouvert : leurs contrats sont les fichiers exportés par mvn test.
+  # Depuis le contrat de la passerelle, « Authorize » obtient un jeton Keycloak (client credentials).
+  swagger-ui:
+    image: swaggerapi/swagger-ui:v5.17.14
+    environment:
+      URLS: >-
+        [{"url": "openapi/api-gateway.yaml", "name": "Passerelle (API publique)"},
+         {"url": "openapi/drone-service.yaml", "name": "drone-service"},
+         {"url": "openapi/commande-service.yaml", "name": "commande-service"},
+         {"url": "openapi/slice-service.yaml", "name": "slice-service"}]
+      URLS_PRIMARY_NAME: Passerelle (API publique)
+    volumes:
+      - ./openapi:/usr/share/nginx/html/openapi:ro
+    ports:
+      - "8090:8080"
+
+  drone-db:
+    networks: [donnees-drone]
+    image: postgres:16
+    environment:
+      POSTGRES_DB: drone
+      POSTGRES_USER: drone
+      POSTGRES_PASSWORD: drone
+    volumes:
+      - donnees-drone:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U drone -d drone"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  drone-service:
+    networks: [public, donnees-drone]
+    build:
+      context: .                          # racine : le Dockerfile a besoin du POM parent
+      dockerfile: drone-service/Dockerfile
+    depends_on:
+      drone-db:
+        condition: service_healthy        # attend que PostgreSQL accepte les connexions
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://drone-db:5432/drone
+      SPRING_DATASOURCE_USERNAME: drone
+      SPRING_DATASOURCE_PASSWORD: drone
+
+  commande-db:
+    networks: [donnees-commande]
+    image: postgres:16
+    environment:
+      POSTGRES_DB: commande
+      POSTGRES_USER: commande
+      POSTGRES_PASSWORD: commande
+    volumes:
+      - donnees-commande:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U commande -d commande"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+
+  commande-service:
+    networks: [public, donnees-commande]
+    build:
+      context: .                          # racine : le Dockerfile a besoin du POM parent
+      dockerfile: commande-service/Dockerfile
+    depends_on:
+      commande-db:
+        condition: service_healthy        # attend que PostgreSQL accepte les connexions
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://commande-db:5432/commande
+      SPRING_DATASOURCE_USERNAME: commande
+      SPRING_DATASOURCE_PASSWORD: commande
+      DRONE_SERVICE_URL: http://drone-service:8081   # dépendance REST vers drone-service
+      SLICE_SERVICE_URL: http://slice-service:8083   # dépendance REST vers slice-service (UC-06)
+
+  slice-db:
+    networks: [donnees-slice]
+    image: postgres:16
+    environment:
+      POSTGRES_DB: slice
+      POSTGRES_USER: slice
+      POSTGRES_PASSWORD: slice
+    volumes:
+      - donnees-slice:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U slice -d slice"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  slice-service:
+    networks: [public, donnees-slice]
+    build:
+      context: .                          # racine : le Dockerfile a besoin du POM parent
+      dockerfile: slice-service/Dockerfile
+    depends_on:
+      slice-db:
+        condition: service_healthy
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://slice-db:5432/slice
+      SPRING_DATASOURCE_USERNAME: slice
+      SPRING_DATASOURCE_PASSWORD: slice
+      DRONE_SERVICE_URL: http://drone-service:8081   # dépendance REST vers drone-service (IMSI)
+      # Réseau 5G simulé (MockOpen5GSAdapter) : valeurs par défaut de l'énoncé, modifiables via .env
+      MOCK_LATENCE_MIN_MS: ${MOCK_LATENCE_MIN_MS:-300}
+      MOCK_LATENCE_MAX_MS: ${MOCK_LATENCE_MAX_MS:-1500}
+      MOCK_TAUX_ECHEC: ${MOCK_TAUX_ECHEC:-0.0}
+      MOCK_DELAI_ATTENTE_MS: ${MOCK_DELAI_ATTENTE_MS:-5000}
+
+# Segmentation : seuls la passerelle (et Keycloak, pour obtenir un jeton) sont publiés sur l'hôte.
+# public : passerelle, Keycloak et les 3 services (appels entre services, vérification des jetons).
+# donnees-* : un réseau privé par service et sa base ; aucun autre conteneur ne peut joindre cette base.
+networks:
+  public:
+  donnees-drone:
+    internal: true
+  donnees-commande:
+    internal: true
+  donnees-slice:
+    internal: true
+
+volumes:
+  donnees-drone:
+  donnees-commande:
+  donnees-slice:
