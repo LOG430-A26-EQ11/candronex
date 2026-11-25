@@ -77,6 +77,32 @@ services:
       SPRING_DATASOURCE_USERNAME: drone
       SPRING_DATASOURCE_PASSWORD: drone
 
+  flotte-db:
+    networks: [donnees-flotte]
+    image: postgres:16
+    environment:
+      POSTGRES_DB: flotte
+      POSTGRES_USER: flotte
+      POSTGRES_PASSWORD: flotte
+    volumes:
+      - donnees-flotte:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U flotte -d flotte"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  fleet-management-service:
+    networks: [public, donnees-flotte]
+    build:
+      context: .
+      dockerfile: fleet-management-service/Dockerfile
+    depends_on:
+      flotte-db:
+        condition: service_healthy
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://flotte-db:5432/flotte
+
   commande-db:
     networks: [donnees-commande]
     image: postgres:16
@@ -149,6 +175,8 @@ networks:
   public:
   donnees-drone:
     internal: true
+  donnees-flotte:
+    internal: true
   donnees-commande:
     internal: true
   donnees-slice:
@@ -156,5 +184,6 @@ networks:
 
 volumes:
   donnees-drone:
+  donnees-flotte:
   donnees-commande:
   donnees-slice:

@@ -29,6 +29,45 @@
   },
   "endpoints": [
     {
+      "@comment": 	"UC-16 - Créer une flotte",
+      "endpoint": "/api/drone-service/v1/flotte",
+      "method": "POST",
+      "input_headers": [
+        "Authorization",
+        "X-Client-Id",
+        "Content-Type",
+        "Idempotency-Key",
+        "X-Correlation-Id"
+      ],
+      "output_encoding": "no-op",
+      "backend": [
+        {
+          "host": [
+            "http://fleet-management-service:8084"
+          ],
+          "url_pattern": 	"/api/drone-service/v1/flotte",
+          "encoding": "no-op"
+        }
+      ],
+      "extra_config": {
+        "auth/validator": {
+          "alg": "RS256",
+          "jwk_url": "http://keycloak:8080/realms/candronex/protocol/openid-connect/certs",
+          "disable_jwk_security": true,
+          "issuer": "http://localhost:8081/realms/candronex",
+          "audience": [
+            "candronex-api"
+          ],
+          "cache": true,
+          "propagate_claims": [
+            [
+              "azp",
+              "X-Client-Id"
+            ]
+          ]
+        }
+      }
+    },{
       "@comment": "UC-02 - Enregistrer un drone (tout client B2B authentifie)",
       "endpoint": "/api/drone-service/v1/drone",
       "method": "POST",
@@ -107,6 +146,121 @@
       }
     },
     {
+      "@comment": 	"UC-16 - Ajouter un drone à une flotte",
+      "endpoint": "/api/drone-service/v1/flotte/{flotteId}/drones/{droneId}",
+      "method": "PUT",
+      "input_headers": [
+        "Authorization",
+        "X-Client-Id",
+        "X-Correlation-Id"
+      ],
+      "output_encoding": "no-op",
+      "backend": [
+        {
+          "host": [
+            "http://fleet-management-service:8084"
+          ],
+          "url_pattern": 	"/api/drone-service/v1/flotte/{flotteId}/drones/{droneId}",
+          "encoding": "no-op"
+        }
+      ],
+      "extra_config": {
+        "auth/validator": {
+          "alg": "RS256",
+          "jwk_url": "http://keycloak:8080/realms/candronex/protocol/openid-connect/certs",
+          "disable_jwk_security": true,
+          "issuer": "http://localhost:8081/realms/candronex",
+          "audience": [
+            "candronex-api"
+          ],
+          "cache": true,
+          "propagate_claims": [
+            [
+              "azp",
+              "X-Client-Id"
+            ]
+          ]
+        }
+      }
+    },
+    {
+      "@comment": "UC-16 - Consulter une flotte",
+      "endpoint": 	"/api/drone-service/v1/flotte/{flotteId}",
+      "method": "GET",
+      "input_headers": [
+        "Authorization",
+        "X-Client-Id",
+        "X-Correlation-Id"
+      ],
+      "output_encoding": "no-op",
+      "backend": [
+        {
+          "host": [
+            "http://fleet-management-service:8084"
+          ],
+          "url_pattern": "/api/drone-service/v1/flotte/{flotteId}",
+          "encoding": "no-op"
+        }
+      ],
+      "extra_config": {
+        "auth/validator": {
+          "alg": "RS256",
+          "jwk_url": "http://keycloak:8080/realms/candronex/protocol/openid-connect/certs",
+          "disable_jwk_security": true,
+          "issuer": "http://localhost:8081/realms/candronex",
+          "audience": [
+            "candronex-api"
+          ],
+          "cache": true,
+          "propagate_claims": [
+            [
+              "azp",
+              "X-Client-Id"
+            ]
+          ]
+        }
+      }
+    },    
+    {
+      "@comment": 	"UC-19 - Consulter le suivi d’un ordre de flotte",
+      "endpoint": 		"/api/drone-service/v1/flotte/{flotteId}/ordres/{ordreId}/suivi",
+      "method": "GET",
+      "input_query_strings": ["page", "taille", "pret"],
+      "input_headers": [
+        "Authorization",
+        "X-Client-Id",
+        "X-Correlation-Id"
+      ],
+      "output_encoding": "no-op",
+      "backend": [
+        {
+          "host": [
+            "http://fleet-management-service:8084"
+          ],
+          "url_pattern": 	"/api/drone-service/v1/flotte/{flotteId}/ordres/{ordreId}/suivi",
+          "encoding": "no-op"
+        }
+      ],
+      "extra_config": {
+        "auth/validator": {
+          "alg": "RS256",
+          "jwk_url": "http://keycloak:8080/realms/candronex/protocol/openid-connect/certs",
+          "disable_jwk_security": true,
+          "issuer": "http://localhost:8081/realms/candronex",
+          "audience": [
+            "candronex-api"
+          ],
+          "cache": true,
+          "propagate_claims": [
+            [
+              "azp",
+              "X-Client-Id"
+            ]
+          ]
+        }
+      }
+    },
+    {
       "@comment": "UC-04 - Commander les services d'un drone (Idempotency-Key obligatoire)",
       "endpoint": "/api/commande-service/v1/commande",
       "method": "POST",
@@ -124,6 +278,45 @@
             "http://commande-service:8082"
           ],
           "url_pattern": "/api/commande-service/v1/commande",
+          "encoding": "no-op"
+        }
+      ],
+      "extra_config": {
+        "auth/validator": {
+          "alg": "RS256",
+          "jwk_url": "http://keycloak:8080/realms/candronex/protocol/openid-connect/certs",
+          "disable_jwk_security": true,
+          "issuer": "http://localhost:8081/realms/candronex",
+          "audience": [
+            "candronex-api"
+          ],
+          "cache": true,
+          "propagate_claims": [
+            [
+              "azp",
+              "X-Client-Id"
+            ]
+          ]
+        }
+      }
+    },    {
+      "@comment": 	"UC-17 - Soumettre un ordre de flotte",
+      "endpoint": 	"/api/commande-service/v1/commande/flotte",
+      "method": "POST",
+      "input_headers": [
+        "Authorization",
+        "X-Client-Id",
+        "Content-Type",
+        "Idempotency-Key",
+        "X-Correlation-Id"
+      ],
+      "output_encoding": "no-op",
+      "backend": [
+        {
+          "host": [
+            "http://commande-service:8082"
+          ],
+          "url_pattern": 	"/api/commande-service/v1/commande/flotte",
           "encoding": "no-op"
         }
       ],
@@ -224,3 +417,4 @@
     }
   ]
 }
+

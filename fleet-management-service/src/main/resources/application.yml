@@ -1,0 +1,40 @@
+server:
+  port: ${SERVER_PORT:8084}
+
+spring:
+  application:
+    name: fleet-management-service
+  datasource:
+    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/flotte}
+    username: ${SPRING_DATASOURCE_USERNAME:flotte}
+    password: ${SPRING_DATASOURCE_PASSWORD:flotte}
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          # Clés publiques de Keycloak pour vérifier la signature (joint par le réseau Docker)
+          jwk-set-uri: ${JWT_JWKS_URL:http://keycloak:8080/realms/candronex/protocol/openid-connect/certs}
+          # Émetteur attendu (iss) : celui fixé par KC_HOSTNAME
+          issuer-uri: ${JWT_ISSUER:http://localhost:8081/realms/candronex}
+          # Audience attendue (aud) : un jeton émis pour une autre API est refusé
+          audiences: candronex-api
+  jpa:
+    hibernate:
+      ddl-auto: validate      # Flyway crée le schéma ; Hibernate vérifie seulement
+    open-in-view: false
+
+springdoc:
+  # Les erreurs sont documentées opération par opération (@ApiResponse), pas déduites de GestionnaireErreurs
+  override-with-generic-response: false
+  writer-with-order-by-keys: true   # YAML exporté stable d'une génération à l'autre (diff lisibles)
+  default-produces-media-type: application/json
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health
+
+logging:
+  pattern:
+    level: "%5p [fleet-management-service] [corr=%X{correlationId:-}] [commandeId=%X{commandeId:-}]"

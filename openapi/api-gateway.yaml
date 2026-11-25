@@ -1,8 +1,7 @@
 # Contrat PUBLIC de CanDroneX, tel qu'exposé par la passerelle KrakenD (krakend/krakend.json).
-# Écrit à la main : KrakenD ne génère pas d'OpenAPI. Il ne contient que les 5 routes publiques ;
+# Écrit à la main : KrakenD ne génère pas d'OpenAPI. Seules les routes publiques sont décrites ;
 # les routes internes (identite-reseau, activation, service?commandeId=) ne sont pas exposées.
-# Les schémas et les erreurs ne sont pas recopiés : ils renvoient ($ref) aux contrats générés
-# à partir du code de chaque service (drone-service.yaml, commande-service.yaml, slice-service.yaml).
+# Les schémas communs renvoient aux contrats générés à partir des services.
 openapi: 3.1.0
 info:
   title: CanDroneX API (passerelle)
@@ -27,11 +26,154 @@ security:
 tags:
   - name: Drones
     description: "UC-02 : enregistrer et consulter ses drones"
+  - name: Flottes
+    description: "UC-16 et UC-19 : gérer les flottes et suivre leurs ordres"
   - name: Commandes
     description: "UC-04 : commander des services réseau pour ses drones"
   - name: Services
     description: "UC-06 : suivre l'état d'activation de ses services"
 paths:
+  /api/drone-service/v1/flotte:
+    post:
+      tags: [Flottes]
+      operationId: creerFlotte
+      summary: Créer une flotte (UC-16)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [nom]
+              properties:
+                nom: { type: string, minLength: 1, maxLength: 100 }
+      responses:
+        "201":
+          description: Flotte créée avec une liste de drones vide
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Flotte" }
+        "400": { $ref: "drone-service.yaml#/components/responses/RequeteInvalide" }
+        "401": { $ref: "#/components/responses/RefusPasserelle" }
+
+  /api/drone-service/v1/flotte/{flotteId}:
+    parameters:
+      - $ref: "#/components/parameters/FlotteId"
+    get:
+      tags: [Flottes]
+      operationId: consulterFlotte
+      summary: Consulter la composition d’une flotte (UC-16)
+      responses:
+        "200":
+          description: Flotte du client et identifiants des drones associés
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Flotte" }
+        "400": { $ref: "drone-service.yaml#/components/responses/RequeteInvalide" }
+        "401": { $ref: "#/components/responses/RefusPasserelle" }
+        "404": { $ref: "#/components/responses/RessourceFlotteIntrouvable" }
+
+  /api/drone-service/v1/flotte/{flotteId}/drones/{droneId}:
+    parameters:
+      - $ref: "#/components/parameters/FlotteId"
+      - name: droneId
+        in: path
+        required: true
+        schema: { type: string, example: DRONE-600 }
+    put:
+      tags: [Flottes]
+      operationId: ajouterDroneFlotte
+      summary: Associer un drone déjà enregistré à une flotte (UC-16)
+      responses:
+        "204":
+          description: Drone associé ou déjà présent dans la flotte
+        "400": { $ref: "drone-service.yaml#/components/responses/RequeteInvalide" }
+        "401": { $ref: "#/components/responses/RefusPasserelle" }
+        "404": { $ref: "#/components/responses/RessourceFlotteIntrouvable" }
+        "503": { $ref: "commande-service.yaml#/components/responses/DependanceIndisponible" }
+
+  /api/drone-service/v1/flotte/{flotteId}/ordres/{ordreId}/suivi:
+    parameters:
+      - $ref: "#/components/parameters/FlotteId"
+      - name: ordreId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    get:
+      tags: [Flottes]
+      operationId: consulterSuiviFlotte
+      summary: Consulter le suivi d’un ordre de flotte (UC-19)
+      description: Le filtre est appliqué avant la pagination. Les compteurs et la progression couvrent l’ordre entier.
+      parameters:
+        - name: page
+          in: query
+          description: Numéro de page à partir de zéro. Une page hors limites est vide.
+          schema: { type: integer, minimum: 0, default: 0 }
+        - name: taille
+          in: query
+          description: Nombre maximal de drones par page.
+          schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+        - name: pret
+          in: query
+          description: Limite le détail aux drones prêts ou aux drones non prêts, selon la valeur.
+          schema: { type: boolean }
+      responses:
+        "200":
+          description: Suivi agrégé et page de détail des drones
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SuiviFlotte" }
+        "400": { $ref: "drone-service.yaml#/components/responses/RequeteInvalide" }
+        "401": { $ref: "#/components/responses/RefusPasserelle" }
+        "404": { $ref: "#/components/responses/RessourceFlotteIntrouvable" }
+
+  /api/commande-service/v1/commande/flotte:
+    post:
+      tags: [Commandes]
+      operationId: passerOrdreFlotte
+      summary: Soumettre un ordre de flotte en REST synchrone (UC-17)
+      description: Crée un élément par combinaison de drone de la flotte et de service demandé.
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema: { type: string, maxLength: 100 }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [flotteId, typesService]
+              properties:
+                flotteId: { type: string, format: uuid }
+                typesService:
+                  type: array
+                  minItems: 1
+                  items: { type: string, enum: [C2, IMAGERIE] }
+      responses:
+        "201":
+          description: Ordre de flotte créé
+          headers:
+            Location:
+              description: URL de la commande créée
+              schema: { type: string }
+          content:
+            application/json:
+              schema: { $ref: "commande-service.yaml#/components/schemas/CommandeResponse" }
+        "200":
+          description: Commande existante renvoyée lors du rejeu
+          content:
+            application/json:
+              schema: { $ref: "commande-service.yaml#/components/schemas/CommandeResponse" }
+        "400": { $ref: "commande-service.yaml#/components/responses/RequeteInvalide" }
+        "401": { $ref: "#/components/responses/RefusPasserelle" }
+        "404": { $ref: "#/components/responses/RessourceFlotteIntrouvable" }
+        "409": { $ref: "commande-service.yaml#/components/responses/CleReutilisee" }
+        "422": { $ref: "commande-service.yaml#/components/responses/RegleMetier" }
+        "500": { $ref: "commande-service.yaml#/components/responses/ErreurInterne" }
+        "503": { $ref: "commande-service.yaml#/components/responses/DependanceIndisponible" }
+
   /api/drone-service/v1/drone:
     post:
       tags: [Drones]
@@ -215,6 +357,65 @@ paths:
         "500": { $ref: "slice-service.yaml#/components/responses/ErreurInterne" }
 
 components:
+  schemas:
+    Flotte:
+      type: object
+      required: [id, nom, drones]
+      properties:
+        id: { type: string, format: uuid }
+        nom: { type: string }
+        drones:
+          type: array
+          items: { type: string }
+    SuiviFlotte:
+      type: object
+      required: [flotteId, ordreId, etatOrdre, versionProjection, misAJourLe, compteursConfiguration, progressionConfigurationPourcent, nombreDronesConnectes, nombreDronesPrets, page, taille, totalDrones, totalDronesFiltres, drones]
+      properties:
+        flotteId: { type: string, format: uuid }
+        ordreId: { type: string, format: uuid }
+        etatOrdre: { type: string }
+        versionProjection: { type: integer, format: int64, minimum: 0 }
+        misAJourLe: { type: string, format: date-time }
+        compteursConfiguration:
+          type: object
+          additionalProperties: { type: integer, format: int64, minimum: 0 }
+        progressionConfigurationPourcent:
+          type: number
+          minimum: 0
+          maximum: 100
+          description: Pourcentage de services dont la configuration est terminée, en succès ou en échec.
+        nombreDronesConnectes: { type: integer, format: int64, minimum: 0 }
+        nombreDronesPrets: { type: integer, format: int64, minimum: 0 }
+        page: { type: integer, minimum: 0 }
+        taille: { type: integer, minimum: 1, maximum: 100 }
+        totalDrones:
+          type: integer
+          minimum: 0
+          description: Nombre de drones dans le suivi de l’ordre entier.
+        totalDronesFiltres:
+          type: integer
+          minimum: 0
+          description: Nombre de drones correspondant au filtre avant pagination.
+        drones:
+          type: array
+          items: { $ref: "#/components/schemas/DroneSuivi" }
+    DroneSuivi:
+      type: object
+      required: [droneId, pret, services]
+      properties:
+        droneId: { type: string }
+        pret: { type: boolean }
+        services:
+          type: array
+          items: { $ref: "#/components/schemas/ServiceSuivi" }
+    ServiceSuivi:
+      type: object
+      required: [typeService, etatConfiguration, etatConnectivite, erreur]
+      properties:
+        typeService: { type: string }
+        etatConfiguration: { type: string }
+        etatConnectivite: { type: string }
+        erreur: { type: [string, "null"] }
   securitySchemes:
     keycloak:
       type: oauth2
@@ -227,6 +428,11 @@ components:
           scopes: {}
 
   parameters:
+    FlotteId:
+      name: flotteId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
     CorrelationId:
       name: X-Correlation-Id
       in: header
@@ -238,6 +444,11 @@ components:
       example: 3f2b8c1e-5d0a-4e7b-9c61-2a4f8e0d7b13
 
   responses:
+    RessourceFlotteIntrouvable:
+      description: Flotte, drone ou suivi introuvable pour le client authentifié.
+      content:
+        application/problem+json:
+          schema: { $ref: "drone-service.yaml#/components/schemas/ProblemDetails" }
     RefusPasserelle:
       description: |-
         Jeton absent, invalide, expiré, ou émis pour une autre audience : refusé par la passerelle,

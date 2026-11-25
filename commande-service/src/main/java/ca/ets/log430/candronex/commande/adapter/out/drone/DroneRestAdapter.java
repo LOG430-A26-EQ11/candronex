@@ -17,7 +17,9 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.client.HttpClientErrorException;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
-
+import ca.ets.log430.candronex.commande.domain.ConsultationFlottePort;
+import java.util.List;
+import java.util.UUID;
 import java.time.Duration;
 import java.util.Optional;
 
@@ -26,17 +28,20 @@ import java.util.Optional;
  * Transmet le JWT du client (drone-service le revalide et filtre par azp) et l'identifiant de corrélation.
  */
 @Component
-class DroneRestAdapter implements VerificationDronePort {
+class DroneRestAdapter implements VerificationDronePort, ConsultationFlottePort {
     private static final Logger log = LoggerFactory.getLogger(DroneRestAdapter.class);
 
     private final RestClient client;
+    private final RestClient flotteClient;
 
-    DroneRestAdapter(RestClient.Builder builder, @Value("${candronex.drone-service.url}") String url) {
+    DroneRestAdapter(RestClient.Builder builder, @Value("${candronex.drone-service.url}") String url,
+                     @Value("${FLEET_MANAGEMENT_URL:http://fleet-management-service:8084}") String flotteUrl) {
         // Délais d'attente : un drone-service lent ne doit pas bloquer la commande indéfiniment
         SimpleClientHttpRequestFactory delais = new SimpleClientHttpRequestFactory();
         delais.setConnectTimeout(Duration.ofSeconds(2));
         delais.setReadTimeout(Duration.ofSeconds(3));
-        this.client = builder.baseUrl(url).requestFactory(delais).build();
+        this.client = builder.clone().baseUrl(url).requestFactory(delais).build();
+        this.flotteClient = builder.baseUrl(flotteUrl).requestFactory(delais).build();
     }
 
     @Override
@@ -57,7 +62,27 @@ class DroneRestAdapter implements VerificationDronePort {
             throw new DroneServiceIndisponibleException();
         }
     }
+    @Override
+    public Optional<List<String>> trouverDrones(UUID flotteId) {
+        try {
+            FlotteDto flotte = flotteClient.get()
+                    .uri("/api/drone-service/v1/flotte/{flotteId}", flotteId)
+                    .header(HttpHeaders.AUTHORIZATION, jetonCourant())
+                    .header(CorrelationIdFilter.EN_TETE, MDC.get(CorrelationIdFilter.CLE_MDC))
+                    .retrieve()
+                    .body(FlotteDto.class);
 
+            if (flotte == null || flotte.drones() == null) {
+                throw new DroneServiceIndisponibleException();
+            }
+            return Optional.of(flotte.drones());
+        } catch (HttpClientErrorException.NotFound e) {
+            return Optional.empty();
+        } catch (RestClientException e) {
+            log.warn("[adapter.out] Consultation de flotte impossible flotteId={}", flotteId, e);
+            throw new DroneServiceIndisponibleException();
+        }
+    }
     /** Le jeton de la requête en cours, tel que reçu : drone-service fera sa propre validation. */
     private String jetonCourant() {
         JwtAuthenticationToken auth = (JwtAuthenticationToken) SecurityContextHolder.getContext().getAuthentication();
@@ -66,4 +91,5 @@ class DroneRestAdapter implements VerificationDronePort {
 
     /** DTO dédié : seuls les champs dont la commande a besoin (les autres sont ignorés). */
     record DroneDto(String droneId, String statut) {}
+    record FlotteDto(List<String> drones) {}
 }

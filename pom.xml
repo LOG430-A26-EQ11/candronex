@@ -21,6 +21,7 @@
     <!-- Chaque module = un microservice ; on en ajoutera au fur et à mesure -->
     <modules>
         <module>drone-service</module>
+        <module>fleet-management-service</module>
         <module>commande-service</module>
         <module>slice-service</module>
     </modules>
